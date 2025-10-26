@@ -1,0 +1,18 @@
+{
+  "apiKey": "YOUR_TESTNET_KEY",
+  "apiSecret": "YOUR_TESTNET_SECRET",
+  "baseUrl": "https://testnet.binance.vision",
+  "symbol": "BTCUSDT",
+  "quoteOrderQuantity": 10.0,
+  "shortWindow": 7,
+  "longWindow": 25,
+  "pollingIntervalMs": 5000,
+  "minSpreadRatio": 0.0005,
+  "quantityPrecision": 6,
+  "minQuantity": 0.000001,
+  "minNotional": 10.0,
+  "useFullBalance": false,
+  "minProfitRatio": 0.0,
+  "tradeMode": "PAPER",
+  "reportsDir": "reports"
+}
