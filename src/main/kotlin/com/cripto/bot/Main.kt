@@ -13,6 +13,8 @@ import com.cripto.bot.execution.PositionTracker
 import com.cripto.bot.reporting.FileTradeReporter
 import com.cripto.bot.reporting.TradeReporter
 import com.cripto.bot.strategy.MovingAverageStrategy
+import com.cripto.bot.notification.EmailTradeNotifier
+import com.cripto.bot.notification.TradeNotifier
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
@@ -55,7 +57,11 @@ fun main(): Unit = runBlocking {
         TradeMode.LIVE -> PositionTracker()
         TradeMode.PAPER -> null
     }
-    val orderExecutor = createOrderExecutor(config, binanceClient, tradeReporter, positionTracker)
+    val tradeNotifier = config.emailConfig
+        ?.takeIf { it.enabled }
+        ?.let { EmailTradeNotifier(it) }
+
+    val orderExecutor = createOrderExecutor(config, binanceClient, tradeReporter, positionTracker, tradeNotifier)
 
     val bot = TradingBot(
         config = config,
@@ -75,9 +81,10 @@ private fun createOrderExecutor(
     config: BotConfig,
     binanceClient: BinanceApiClient,
     tradeReporter: TradeReporter?,
-    positionTracker: PositionTracker?
+    positionTracker: PositionTracker?,
+    tradeNotifier: TradeNotifier?
 ): OrderExecutor =
     when (config.tradeMode) {
         TradeMode.PAPER -> PaperOrderExecutor()
-        TradeMode.LIVE -> BinanceOrderExecutor(binanceClient, config, tradeReporter, positionTracker)
+        TradeMode.LIVE -> BinanceOrderExecutor(binanceClient, config, tradeReporter, positionTracker, tradeNotifier)
     }

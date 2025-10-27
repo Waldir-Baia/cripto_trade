@@ -36,10 +36,32 @@ data class BotConfig(
     @SerialName("tradeMode")
     val tradeMode: TradeMode = TradeMode.PAPER,
     @SerialName("reportsDir")
-    val reportsDir: String = "reports"
+    val reportsDir: String = "reports",
+    @SerialName("emailConfig")
+    val emailConfig: EmailConfig? = null
 )
 
 enum class TradeMode {
     PAPER,
     LIVE
 }
+
+@Serializable
+data class EmailConfig(
+    @SerialName("enabled")
+    val enabled: Boolean = false,
+    @SerialName("host")
+    val host: String = "smtp.gmail.com",
+    @SerialName("port")
+    val port: Int = 587,
+    @SerialName("username")
+    val username: String? = null,
+    @SerialName("password")
+    val password: String? = null,
+    @SerialName("from")
+    val from: String? = null,
+    @SerialName("to")
+    val to: String? = null,
+    @SerialName("subjectPrefix")
+    val subjectPrefix: String = "[Trade Bot]"
+)

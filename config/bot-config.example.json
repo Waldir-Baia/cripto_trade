@@ -14,5 +14,34 @@
   "useFullBalance": false,
   "minProfitRatio": 0.0,
   "tradeMode": "PAPER",
-  "reportsDir": "reports"
+  "reportsDir": "reports",
+  "conversionArbitrage": {
+    "enabled": false,
+    "pollingIntervalMs": 15000,
+    "feeRate": 0.001,
+    "minProfitRatio": 0.001,
+    "budget": 10.0,
+    "executeTrades": false,
+    "paths": [
+      {
+        "name": "BTC-Arb",
+        "startAsset": "USDT",
+        "legs": [
+          { "symbol": "BTCUSDT", "fromAsset": "USDT", "toAsset": "BTC", "side": "BUY" },
+          { "symbol": "BTCEUR", "fromAsset": "BTC", "toAsset": "EUR", "side": "SELL" },
+          { "symbol": "EURUSDT", "fromAsset": "EUR", "toAsset": "USDT", "side": "SELL" }
+        ]
+      }
+    ]
+  },
+  "emailConfig": {
+    "enabled": false,
+    "host": "smtp.gmail.com",
+    "port": 587,
+    "username": "your-email@gmail.com",
+    "password": "app-password",
+    "from": "your-email@gmail.com",
+    "to": "destination@example.com",
+    "subjectPrefix": "[Trade Bot]"
+  }
 }

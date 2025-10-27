@@ -21,6 +21,7 @@ dependencies {
     implementation("io.ktor:ktor-client-logging:2.3.9")
     implementation("io.github.microutils:kotlin-logging-jvm:3.0.5")
     implementation("ch.qos.logback:logback-classic:1.4.14")
+    implementation("com.sun.mail:jakarta.mail:2.0.1")
 
     testImplementation(kotlin("test"))
 }

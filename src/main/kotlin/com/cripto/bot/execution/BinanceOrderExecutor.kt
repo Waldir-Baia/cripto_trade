@@ -9,6 +9,8 @@ import com.cripto.bot.model.TradeSignal
 import com.cripto.bot.reporting.TradeRecord
 import com.cripto.bot.reporting.TradeReporter
 import com.cripto.bot.config.TradeMode
+import com.cripto.bot.notification.TradeNotifier
+import com.cripto.bot.notification.SaleNotification
 import mu.KotlinLogging
 import java.time.Instant
 import java.math.BigDecimal
@@ -18,7 +20,8 @@ class BinanceOrderExecutor(
     private val apiClient: BinanceApiClient,
     private val config: BotConfig,
     private val tradeReporter: TradeReporter?,
-    private val positionTracker: PositionTracker?
+    private val positionTracker: PositionTracker?,
+    private val tradeNotifier: TradeNotifier?
 ) : OrderExecutor {
     private val logger = KotlinLogging.logger {}
     private val baseAsset: String
@@ -113,6 +116,19 @@ class BinanceOrderExecutor(
         val quoteChange = stats.toQuoteChange(side, request.quoteOrderQty ?: config.quoteOrderQuantity)
         val realized = positionTracker?.register(side, stats.executedQty, stats.avgPrice) ?: 0.0
         tradeReporter?.record(response.toTradeRecord(side, reason, stats, quoteChange, realized))
+        if (side == OrderSide.SELL) {
+            tradeNotifier?.notifySale(
+                SaleNotification(
+                    symbol = response.symbol,
+                    quantity = stats.executedQty,
+                    averagePrice = stats.avgPrice,
+                    realizedProfit = realized,
+                    quoteChange = quoteChange,
+                    reason = reason,
+                    timestampMillis = System.currentTimeMillis()
+                )
+            )
+        }
     }
 
     private suspend fun determineQuoteQuantity(): Double {
