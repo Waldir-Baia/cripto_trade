@@ -131,6 +131,23 @@ class BinanceOrderExecutor(
         }
     }
 
+    suspend fun liquidateExistingPosition() {
+        val balance = apiClient.getAssetBalance(baseAsset)
+        val normalizedQty = normalizeQuantity(balance)
+        if (normalizedQty < config.minQuantity) {
+            logger.info { "No leftover $baseAsset position to liquidate on startup (have=$balance)" }
+            return
+        }
+        val fallbackPrice = apiClient.getTickerPrice(config.symbol)
+        logger.warn { "Liquidating leftover $baseAsset position of $normalizedQty before starting trading loop." }
+        val request = NewOrderRequest(
+            symbol = config.symbol,
+            side = OrderSide.SELL,
+            quantity = normalizedQty
+        )
+        executeAndReport(request, OrderSide.SELL, "Startup liquidation", fallbackPrice)
+    }
+
     private suspend fun determineQuoteQuantity(): Double {
         positionTracker?.let {
             val held = it.availableBaseQuantity()

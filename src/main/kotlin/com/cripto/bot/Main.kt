@@ -63,6 +63,10 @@ fun main(): Unit = runBlocking {
 
     val orderExecutor = createOrderExecutor(config, binanceClient, tradeReporter, positionTracker, tradeNotifier)
 
+    if (orderExecutor is BinanceOrderExecutor) {
+        orderExecutor.liquidateExistingPosition()
+    }
+
     val bot = TradingBot(
         config = config,
         strategy = strategy,
