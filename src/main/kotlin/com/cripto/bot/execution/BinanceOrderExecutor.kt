@@ -37,7 +37,14 @@ class BinanceOrderExecutor(
         when (signal) {
             is TradeSignal.Buy -> placeBuy(signal.reason, lastPrice)
             is TradeSignal.Sell -> placeSell(signal.reason, lastPrice)
-            is TradeSignal.Hold -> logger.debug { "HOLD signal ignored (${signal.reason})" }
+            is TradeSignal.Hold -> {
+                val slReason = stopLossTriggered(lastPrice)
+                if (slReason != null) {
+                    placeSell(slReason, lastPrice)
+                } else {
+                    logger.debug { "HOLD signal (${signal.reason})" }
+                }
+            }
         }
     }
 
@@ -79,9 +86,15 @@ class BinanceOrderExecutor(
             config.minProfitRatio == 0.0 -> 1e-9
             else -> config.minProfitRatio
         }
-        if (profitRatio < targetRatio) {
+        val stopLossReason = stopLossTriggered(lastPrice)
+        val finalReason = when {
+            profitRatio >= targetRatio -> reason
+            stopLossReason != null -> stopLossReason
+            else -> null
+        }
+        if (finalReason == null) {
             logger.debug {
-                "Skipping SELL: profitRatio=${"%.5f".format(profitRatio)} below target ${"%.5f".format(targetRatio)}"
+                "Skipping SELL: profitRatio=${"%.5f".format(profitRatio)} below target ${"%.5f".format(targetRatio)} and stop-loss not triggered"
             }
             return
         }
@@ -98,7 +111,22 @@ class BinanceOrderExecutor(
             quantity = normalizedQty
         )
 
-        executeAndReport(request, OrderSide.SELL, reason, lastPrice)
+        executeAndReport(request, OrderSide.SELL, finalReason, lastPrice)
+    }
+
+    private fun stopLossTriggered(lastPrice: Double): String? {
+        val tracker = positionTracker ?: return null
+        val sl = config.stopLossRatio
+        if (sl <= 0.0) return null
+        val snapshot = tracker.snapshot()
+        if (snapshot.baseQuantity < config.minQuantity) return null
+        if (snapshot.averageCost <= 0.0) return null
+        val ratio = (lastPrice - snapshot.averageCost) / snapshot.averageCost
+        return if (ratio <= -sl) {
+            val dropPct = (-ratio * 100.0).format(2)
+            val slPct = (sl * 100.0).format(2)
+            "Stop-loss triggered: drop ${dropPct}% ≥ ${slPct}%"
+        } else null
     }
 
     private suspend fun executeAndReport(
@@ -242,4 +270,6 @@ class BinanceOrderExecutor(
             .stripTrailingZeros()
         return scaled.toDouble()
     }
+
+    private fun Double.format(decimals: Int): String = "%.${decimals}f".format(this)
 }

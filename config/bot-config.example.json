@@ -13,6 +13,7 @@
   "minNotional": 10.0,
   "useFullBalance": false,
   "minProfitRatio": 0.0,
+  "stopLossRatio": 0.02,
   "tradeMode": "PAPER",
   "reportsDir": "reports",
   "conversionArbitrage": {

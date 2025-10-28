@@ -21,10 +21,7 @@ class TradingBot(
             try {
                 val lastPrice = marketDataService.fetchLastPrice(config.symbol)
                 val signal = strategy.onPrice(lastPrice)
-                when (signal) {
-                    is TradeSignal.Hold -> logger.debug { "HOLD @ $lastPrice - ${signal.reason}" }
-                    else -> orderExecutor.execute(signal, lastPrice)
-                }
+                orderExecutor.execute(signal, lastPrice)
             } catch (ex: Exception) {
                 logger.error(ex) { "Loop error" }
             }

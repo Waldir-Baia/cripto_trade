@@ -33,6 +33,8 @@ data class BotConfig(
     val useFullBalance: Boolean = false,
     @SerialName("minProfitRatio")
     val minProfitRatio: Double = 0.0,
+    @SerialName("stopLossRatio")
+    val stopLossRatio: Double = 0.0,
     @SerialName("tradeMode")
     val tradeMode: TradeMode = TradeMode.PAPER,
     @SerialName("reportsDir")
