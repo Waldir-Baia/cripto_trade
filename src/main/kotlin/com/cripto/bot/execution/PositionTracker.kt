@@ -33,6 +33,12 @@ class PositionTracker {
 
                 baseQty -= sellQty
                 totalCostInQuote -= avgCost * sellQty
+                if (baseQty < 1e-8) {
+                    baseQty = 0.0
+                    totalCostInQuote = 0.0
+                } else if (totalCostInQuote < 1e-8) {
+                    totalCostInQuote = 0.0
+                }
 
                 realized
             }
@@ -40,7 +46,7 @@ class PositionTracker {
     }
 
     @Synchronized
-    fun availableBaseQuantity(): Double = baseQty
+    fun availableBaseQuantity(): Double = if (baseQty < 1e-8) 0.0 else baseQty
 
     @Synchronized
     fun snapshot(): PositionSnapshot =

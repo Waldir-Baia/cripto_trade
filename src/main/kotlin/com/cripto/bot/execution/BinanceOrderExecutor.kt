@@ -2,30 +2,32 @@ package com.cripto.bot.execution
 
 import com.cripto.bot.binance.BinanceApiClient
 import com.cripto.bot.config.BotConfig
+import com.cripto.bot.config.TradeMode
 import com.cripto.bot.model.BinanceOrderResponse
 import com.cripto.bot.model.NewOrderRequest
 import com.cripto.bot.model.OrderSide
 import com.cripto.bot.model.TradeSignal
+import com.cripto.bot.notification.SaleNotification
+import com.cripto.bot.notification.TradeNotifier
 import com.cripto.bot.reporting.TradeRecord
 import com.cripto.bot.reporting.TradeReporter
-import com.cripto.bot.config.TradeMode
-import com.cripto.bot.notification.TradeNotifier
-import com.cripto.bot.notification.SaleNotification
 import mu.KotlinLogging
-import java.time.Instant
+import kotlin.math.min
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.time.Instant
 
 class BinanceOrderExecutor(
     private val apiClient: BinanceApiClient,
     private val config: BotConfig,
     private val tradeReporter: TradeReporter?,
-    private val positionTracker: PositionTracker?,
+    private val positionTracker: PositionTracker,
     private val tradeNotifier: TradeNotifier?
 ) : OrderExecutor {
     private val logger = KotlinLogging.logger {}
     private val baseAsset: String
     private val quoteAsset: String
+    private val tradeDecisions = TradeDecisions(config, positionTracker)
 
     init {
         val (base, quote) = splitSymbol(config.symbol)
@@ -35,98 +37,94 @@ class BinanceOrderExecutor(
 
     override suspend fun execute(signal: TradeSignal, lastPrice: Double) {
         when (signal) {
-            is TradeSignal.Buy -> placeBuy(signal.reason, lastPrice)
-            is TradeSignal.Sell -> placeSell(signal.reason, lastPrice)
-            is TradeSignal.Hold -> {
-                val slReason = stopLossTriggered(lastPrice)
-                if (slReason != null) {
-                    placeSell(slReason, lastPrice)
-                } else {
-                    logger.debug { "HOLD signal (${signal.reason})" }
-                }
-            }
+            is TradeSignal.Buy -> handleBuy(signal.reason, lastPrice)
+            is TradeSignal.Sell -> handleSell(signal.reason, lastPrice)
+            is TradeSignal.Hold -> handleHold(signal.reason, lastPrice)
         }
     }
 
-    private suspend fun placeBuy(reason: String, lastPrice: Double) {
+    private suspend fun handleBuy(reason: String, lastPrice: Double) {
+        if (tradeDecisions.hasOpenPosition()) {
+            val evaluation = tradeDecisions.evaluateExit(lastPrice, reason)
+            if (evaluation != null) {
+                val profit = evaluation.profitRatio.toPercent(3)
+                logger.info { "Exit triggered on repeated BUY: ${evaluation.reason} (profit=$profit)" }
+                submitSell(evaluation, lastPrice)
+            } else {
+                logger.debug { "Skipping BUY: position already open" }
+            }
+            return
+        }
+
         val quoteQty = determineQuoteQuantity()
         if (quoteQty <= 0.0) {
             return
         }
 
+        val orderReason = reason.ifBlank { "Momentum crossover" }
         val request = NewOrderRequest(
             symbol = config.symbol,
             side = OrderSide.BUY,
             quoteOrderQty = quoteQty
         )
 
-        executeAndReport(request, OrderSide.BUY, reason, lastPrice)
+        executeAndReport(request, OrderSide.BUY, orderReason, lastPrice)
     }
 
-    private suspend fun placeSell(reason: String, lastPrice: Double) {
-        val tracker = positionTracker
-        if (tracker == null) {
-            logger.warn { "SELL requested but position tracker unavailable" }
-            return
-        }
-
-        val snapshot = tracker.snapshot()
-        if (snapshot.baseQuantity < config.minQuantity) {
-            logger.warn { "Skipping SELL: no base asset available (have=${snapshot.baseQuantity})" }
-            return
-        }
-
-        val profitRatio = if (snapshot.averageCost > 0.0) {
-            (lastPrice - snapshot.averageCost) / snapshot.averageCost
-        } else {
-            0.0
-        }
-        val targetRatio = when {
-            config.minProfitRatio > 0.0 -> config.minProfitRatio
-            config.minProfitRatio == 0.0 -> 1e-9
-            else -> config.minProfitRatio
-        }
-        val stopLossReason = stopLossTriggered(lastPrice)
-        val finalReason = when {
-            profitRatio >= targetRatio -> reason
-            stopLossReason != null -> stopLossReason
-            else -> null
-        }
-        if (finalReason == null) {
+    private suspend fun handleSell(signalReason: String, lastPrice: Double) {
+        val evaluation = tradeDecisions.evaluateExit(lastPrice, signalReason)
+        if (evaluation == null) {
+            val snapshot = positionTracker.snapshot()
+            val profit = if (snapshot.averageCost > 0.0 && snapshot.baseQuantity >= config.minQuantity) {
+                ((lastPrice - snapshot.averageCost) / snapshot.averageCost).toPercent(4)
+            } else {
+                "n/a"
+            }
             logger.debug {
-                "Skipping SELL: profitRatio=${"%.5f".format(profitRatio)} below target ${"%.5f".format(targetRatio)} and stop-loss not triggered"
+                "Skipping SELL: exit conditions not met (signalReason=$signalReason, profit=$profit)"
             }
             return
         }
 
-        val normalizedQty = normalizeQuantity(snapshot.baseQuantity)
+        submitSell(evaluation, lastPrice)
+    }
+
+    private suspend fun handleHold(reason: String, lastPrice: Double) {
+        val evaluation = tradeDecisions.evaluateExit(lastPrice, null)
+        if (evaluation != null) {
+            val profit = evaluation.profitRatio.toPercent(3)
+            logger.info { "Stop exit triggered while holding: ${evaluation.reason} (profit=$profit)" }
+            submitSell(evaluation, lastPrice)
+        } else {
+            logger.debug { "HOLD ($reason)" }
+        }
+    }
+
+    private suspend fun submitSell(evaluation: ExitEvaluation, lastPrice: Double) {
+        val normalizedQty = normalizeQuantity(evaluation.snapshot.baseQuantity)
         if (normalizedQty < config.minQuantity) {
-            logger.warn { "Skipping SELL: normalized quantity $normalizedQty below minimum ${config.minQuantity}" }
+            logger.warn {
+                "Skipping SELL: normalized quantity $normalizedQty below minimum ${config.minQuantity}"
+            }
+            return
+        }
+
+        val availableBalance = normalizeQuantity(apiClient.getAssetBalance(baseAsset))
+        val sellQty = min(normalizedQty, availableBalance)
+        if (sellQty < config.minQuantity) {
+            logger.warn {
+                "Skipping SELL: available $baseAsset balance $availableBalance below minimum ${config.minQuantity}"
+            }
             return
         }
 
         val request = NewOrderRequest(
             symbol = config.symbol,
             side = OrderSide.SELL,
-            quantity = normalizedQty
+            quantity = sellQty
         )
 
-        executeAndReport(request, OrderSide.SELL, finalReason, lastPrice)
-    }
-
-    private fun stopLossTriggered(lastPrice: Double): String? {
-        val tracker = positionTracker ?: return null
-        val sl = config.stopLossRatio
-        if (sl <= 0.0) return null
-        val snapshot = tracker.snapshot()
-        if (snapshot.baseQuantity < config.minQuantity) return null
-        if (snapshot.averageCost <= 0.0) return null
-        val ratio = (lastPrice - snapshot.averageCost) / snapshot.averageCost
-        return if (ratio <= -sl) {
-            val dropPct = (-ratio * 100.0).format(2)
-            val slPct = (sl * 100.0).format(2)
-            "Stop-loss triggered: drop ${dropPct}% ≥ ${slPct}%"
-        } else null
+        executeAndReport(request, OrderSide.SELL, evaluation.reason, lastPrice)
     }
 
     private suspend fun executeAndReport(
@@ -142,7 +140,7 @@ class BinanceOrderExecutor(
                 "(orderId=${response.orderId}, reason=$reason, status=${response.status})"
         }
         val quoteChange = stats.toQuoteChange(side, request.quoteOrderQty ?: config.quoteOrderQuantity)
-        val realized = positionTracker?.register(side, stats.executedQty, stats.avgPrice) ?: 0.0
+        val realized = positionTracker.register(side, stats.executedQty, stats.avgPrice)
         tradeReporter?.record(response.toTradeRecord(side, reason, stats, quoteChange, realized))
         if (side == OrderSide.SELL) {
             tradeNotifier?.notifySale(
@@ -177,14 +175,6 @@ class BinanceOrderExecutor(
     }
 
     private suspend fun determineQuoteQuantity(): Double {
-        positionTracker?.let {
-            val held = it.availableBaseQuantity()
-            if (held >= config.minQuantity) {
-                logger.debug { "Skipping BUY: position already open (base=$held)" }
-                return 0.0
-            }
-        }
-
         val budget = if (config.useFullBalance && config.tradeMode == TradeMode.LIVE) {
             apiClient.getAssetBalance(quoteAsset)
         } else {
@@ -270,6 +260,4 @@ class BinanceOrderExecutor(
             .stripTrailingZeros()
         return scaled.toDouble()
     }
-
-    private fun Double.format(decimals: Int): String = "%.${decimals}f".format(this)
 }

@@ -49,13 +49,10 @@ fun main(): Unit = runBlocking {
         longWindow = config.longWindow,
         minSpreadRatio = config.minSpreadRatio
     )
+    val positionTracker = PositionTracker()
     val tradeReporter = when (config.tradeMode) {
         TradeMode.LIVE -> FileTradeReporter(Paths.get(config.reportsDir, "trade-history.csv"))
-        TradeMode.PAPER -> null
-    }
-    val positionTracker = when (config.tradeMode) {
-        TradeMode.LIVE -> PositionTracker()
-        TradeMode.PAPER -> null
+        TradeMode.PAPER -> FileTradeReporter(Paths.get(config.reportsDir, "trade-history-paper.csv"))
     }
     val tradeNotifier = config.emailConfig
         ?.takeIf { it.enabled }
@@ -85,10 +82,10 @@ private fun createOrderExecutor(
     config: BotConfig,
     binanceClient: BinanceApiClient,
     tradeReporter: TradeReporter?,
-    positionTracker: PositionTracker?,
+    positionTracker: PositionTracker,
     tradeNotifier: TradeNotifier?
 ): OrderExecutor =
     when (config.tradeMode) {
-        TradeMode.PAPER -> PaperOrderExecutor()
+        TradeMode.PAPER -> PaperOrderExecutor(config, positionTracker, tradeReporter, tradeNotifier)
         TradeMode.LIVE -> BinanceOrderExecutor(binanceClient, config, tradeReporter, positionTracker, tradeNotifier)
     }

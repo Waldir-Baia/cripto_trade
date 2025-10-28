@@ -19,13 +19,17 @@ class TradingBot(
         logger.info { "Trading bot started on ${config.symbol} (${config.tradeMode})" }
         while (true) {
             try {
-                val lastPrice = marketDataService.fetchLastPrice(config.symbol)
-                val signal = strategy.onPrice(lastPrice)
-                orderExecutor.execute(signal, lastPrice)
+                processTick()
             } catch (ex: Exception) {
                 logger.error(ex) { "Loop error" }
             }
             delay(config.pollingIntervalMs)
         }
+    }
+
+    private suspend fun processTick() {
+        val lastPrice = marketDataService.fetchLastPrice(config.symbol)
+        val signal = strategy.onPrice(lastPrice)
+        orderExecutor.execute(signal, lastPrice)
     }
 }
