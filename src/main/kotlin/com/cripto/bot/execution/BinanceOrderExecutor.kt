@@ -11,11 +11,15 @@ import com.cripto.bot.notification.SaleNotification
 import com.cripto.bot.notification.TradeNotifier
 import com.cripto.bot.reporting.TradeRecord
 import com.cripto.bot.reporting.TradeReporter
-import mu.KotlinLogging
-import kotlin.math.min
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.Instant
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
+import java.nio.file.StandardOpenOption
+import mu.KotlinLogging
+import kotlin.math.min
 
 class BinanceOrderExecutor(
     private val apiClient: BinanceApiClient,
@@ -28,6 +32,7 @@ class BinanceOrderExecutor(
     private val baseAsset: String
     private val quoteAsset: String
     private val tradeDecisions = TradeDecisions(config, positionTracker)
+    private val simulatedSellLogPath: Path = Paths.get("C:\\ApisWeb\\Exemplos\\agent_webscraping\\logs\\sample_bot.log")
 
     init {
         val (base, quote) = splitSymbol(config.symbol)
@@ -133,8 +138,16 @@ class BinanceOrderExecutor(
         reason: String,
         lastPrice: Double
     ) {
-        val response = apiClient.placeOrder(request)
-        val stats = response.executionStats(lastPrice)
+        val (response, stats) = if (side == OrderSide.SELL) {
+            logSimulatedSell()
+            // val response = apiClient.placeOrder(request)
+            // val stats = response.executionStats(lastPrice)
+            val simulatedResponse = buildSimulatedSellResponse(request, lastPrice)
+            simulatedResponse to simulatedResponse.executionStats(lastPrice)
+        } else {
+            val executedResponse = apiClient.placeOrder(request)
+            executedResponse to executedResponse.executionStats(lastPrice)
+        }
         logger.info {
             "Executed $side on ${response.symbol} at approx $$lastPrice " +
                 "(orderId=${response.orderId}, reason=$reason, status=${response.status})"
@@ -259,5 +272,44 @@ class BinanceOrderExecutor(
             .setScale(config.quantityPrecision, RoundingMode.DOWN)
             .stripTrailingZeros()
         return scaled.toDouble()
+    }
+
+    private fun logSimulatedSell() {
+        val parent = simulatedSellLogPath.parent
+        try {
+            if (parent != null && Files.notExists(parent)) {
+                Files.createDirectories(parent)
+            }
+            Files.writeString(
+                simulatedSellLogPath,
+                "DOGE -> USDT${System.lineSeparator()}",
+                StandardOpenOption.CREATE,
+                StandardOpenOption.APPEND
+            )
+        } catch (ex: Exception) {
+            logger.error(ex) { "Failed to append simulated sell log to $simulatedSellLogPath" }
+        }
+    }
+
+    private fun buildSimulatedSellResponse(
+        request: NewOrderRequest,
+        lastPrice: Double
+    ): BinanceOrderResponse {
+        val executedQty = request.quantity ?: 0.0
+        val fill = BinanceOrderResponse.Fill(
+            price = BigDecimal.valueOf(lastPrice).stripTrailingZeros().toPlainString(),
+            qty = BigDecimal.valueOf(executedQty).stripTrailingZeros().toPlainString()
+        )
+
+        return BinanceOrderResponse(
+            symbol = request.symbol,
+            orderId = -1L,
+            clientOrderId = "SIMULATED-SELL",
+            transactTime = System.currentTimeMillis(),
+            status = "SIMULATED",
+            side = OrderSide.SELL.name,
+            type = request.type.name,
+            fills = listOf(fill)
+        )
     }
 }
